@@ -4,7 +4,7 @@ from django.contrib.gis.db import models
 from rest_framework.schemas.openapi import AutoSchema
 from rest_framework.utils import model_meta
 
-from rest_framework_gis.fields import GeometrySerializerMethodField
+from rest_framework_gis.fields import GeometryField, GeometrySerializerMethodField
 from rest_framework_gis.serializers import GeoFeatureModelListSerializer, GeoFeatureModelSerializer
 
 
@@ -79,7 +79,17 @@ class GeoFeatureAutoSchema(AutoSchema):
             }
         }
 
-    def _map_geo_field(self, serializer, geo_field_name):
+    GEO_FIELD_TO_SCHEMA[models.GeometryField] = {
+        'anyOf': [
+            GEO_FIELD_TO_SCHEMA[models.PointField],
+            GEO_FIELD_TO_SCHEMA[models.LineStringField],
+            GEO_FIELD_TO_SCHEMA[models.PolygonField],
+            GEO_FIELD_TO_SCHEMA[models.MultiLineStringField],
+            GEO_FIELD_TO_SCHEMA[models.MultiPolygonField],
+        ],
+    }
+
+    def _map_geo_field_serializer(self, serializer, geo_field_name):
         field = serializer.fields[geo_field_name]
         if isinstance(field, GeometrySerializerMethodField):
             warnings.warn('Geometry generation for GeometrySerializerMethodField is not supported.'.format(field=field))
@@ -94,9 +104,15 @@ class GeoFeatureAutoSchema(AutoSchema):
             warnings.warn('Geometry generation for {field} is not supported.'.format(field=field))
             return {}
 
+        return self._map_geo_field(geo_field)
+
     def _map_field(self, field):
-        if isinstance(field, GeoFeatureModelListSerializer):
-            return self._map_geo_feature_model_list_serializer(field)
+        if isinstance(field, GeometryField):
+            try:
+                return self.GEO_FIELD_TO_SCHEMA[models.GeometryField]
+            except KeyError:
+                warnings.warn('Geometry generation for {field} is not supported.'.format(field=field))
+                return {}
 
         return super()._map_field(field)
 
@@ -134,7 +150,7 @@ class GeoFeatureAutoSchema(AutoSchema):
         geo_field = serializer.Meta.geo_field
         geo_json_schema['properties']['geometry'] = {
             'type': 'object',
-            'properties': self._map_geo_field(serializer, geo_field),
+            'properties': self._map_geo_field_serializer(serializer, geo_field),
         }
         schema['properties'].pop(geo_field)
 
